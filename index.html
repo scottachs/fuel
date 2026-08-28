@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#14161A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Fuel Log">
+<title>Tacoma fuel log</title>
+<style>
+  :root{
+    --panel:#14161A;
+    --panel-edge:#0A0B0E;
+    --amber:#FFB020;
+    --amber-dim:#5C4211;
+    --receipt:#E9E7E1;
+    --receipt-edge:#D4D0C6;
+    --field:#FFFDF8;
+    --ink:#22242A;
+    --ink-soft:#726D63;
+    --ink-faint:#A9A49A;
+    --red:#D2432B;
+    --good:#1F6F52;
+    --sans:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Roboto Mono", monospace;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; }
+  body{
+    background:var(--panel-edge); font-family:var(--sans); line-height:1.5;
+    -webkit-font-smoothing:antialiased; padding:12px; padding-bottom:40px;
+  }
+  .wrap{ max-width:620px; margin:0 auto; }
+  .lbl{ font-size:9.5px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; }
+
+  /* ---- pump display ---- */
+  .pump{ background:var(--panel); padding:20px 20px 22px; border-radius:3px 3px 0 0; }
+  .pump .eyebrow{ color:rgba(255,255,255,.28); margin:0 0 20px; }
+  .readouts{ display:flex; flex-wrap:wrap; gap:16px; }
+  .ro{ flex:1 1 120px; min-width:112px; }
+  .ro .k{ font-size:9px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; color:rgba(255,255,255,.4); margin-bottom:7px; }
+  .ro .v{ display:flex; align-items:baseline; gap:3px; }
+  .ro .fig{
+    font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:29px; font-weight:700;
+    line-height:1; letter-spacing:-.03em; color:var(--amber); text-shadow:0 0 20px rgba(255,176,32,.3);
+  }
+  .ro .fig.off{ color:var(--amber-dim); text-shadow:none; }
+  .ro .u{ font-size:8.5px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; color:rgba(255,255,255,.3); }
+  .pumpfoot{
+    margin-top:20px; padding-top:14px; border-top:1px solid rgba(255,255,255,.08);
+    font-family:var(--mono); font-size:11.5px; color:rgba(255,255,255,.42); line-height:1.75;
+  }
+  .seam{ height:7px; background:repeating-linear-gradient(90deg,var(--panel) 0 5px,var(--receipt) 5px 10px); }
+
+  /* ---- receipt ---- */
+  .receipt{ background:var(--receipt); color:var(--ink); padding:20px 20px 24px; border-radius:0 0 3px 3px; }
+  .sec{ margin-top:26px; border-top:1px solid var(--receipt-edge); padding-top:16px; }
+  .sec:first-child{ margin-top:0; border-top:0; padding-top:0; }
+  h2{ font-size:9.5px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; color:var(--ink-soft); margin:0 0 12px; }
+
+  .row{ display:flex; flex-wrap:wrap; gap:10px; }
+  .fld{ flex:1 1 96px; min-width:88px; }
+  .fld label{ display:block; font-size:9.5px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; color:var(--ink-soft); margin-bottom:5px; }
+  input[type=text],input[type=date],textarea{
+    width:100%; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:15px;
+    padding:9px 10px; background:var(--field); color:var(--ink);
+    border:1px solid var(--receipt-edge); border-radius:2px; outline:none;
+  }
+  textarea{ font-size:11px; line-height:1.5; resize:vertical; }
+  input:focus,textarea:focus,button:focus-visible{ outline:2px solid var(--amber); outline-offset:1px; }
+
+  button{ font-family:var(--sans); cursor:pointer; border-radius:2px; transition:opacity .15s ease; }
+  button:hover{ opacity:.82; }
+  .btn{ font-size:9.5px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; background:var(--ink); color:var(--receipt); border:none; padding:8px 14px; }
+  .btn.lg{ padding:11px 20px; }
+  .ghost{ font-size:9.5px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; background:transparent; color:var(--ink); border:1px solid var(--receipt-edge); padding:8px 12px; }
+  .ghost.soft{ color:var(--ink-soft); }
+  .ghost.danger{ color:var(--red); border-color:var(--red); }
+  .ghost.strong{ border-color:var(--ink); }
+  .btn.danger{ background:var(--red); color:#fff; }
+  button:disabled{ color:#B8B3A9; cursor:default; opacity:1; }
+
+  .chk{ display:flex; align-items:center; gap:8px; cursor:pointer; font-family:var(--mono); font-size:12.5px; }
+  .chk input{ width:16px; height:16px; accent-color:var(--ink); }
+  .actions{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:14px; }
+  .push{ margin-left:auto; }
+  .note{ font-family:var(--mono); font-size:11.5px; line-height:1.65; margin-top:10px; color:var(--ink-soft); }
+  .note.err{ color:var(--red); }
+  .note.ok{ color:var(--good); }
+  .note.boxed{ border:1px solid currentColor; padding:10px 12px; border-radius:2px; }
+  .note.small{ font-size:11px; }
+  [hidden]{ display:none !important; }
+
+  /* ---- calendar ---- */
+  .cal{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .cal .dow{ font-size:8.5px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; color:var(--ink-soft); text-align:center; padding-bottom:4px; }
+  .cal button{
+    font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12.5px; aspect-ratio:1/1;
+    background:transparent; color:var(--ink); border:1px solid var(--receipt-edge); padding:0;
+  }
+  .cal button.wknd{ color:var(--ink-faint); }
+  .cal button.today{ border-width:2px; border-color:var(--ink-soft); }
+  .cal button.on{ background:var(--ink); color:var(--receipt); border-color:var(--ink); border-width:1px; }
+  .cal .pad{ }
+  .monthnav{ display:flex; align-items:center; gap:6px; }
+  .monthnav .mlabel{ font-family:var(--mono); font-size:12.5px; min-width:74px; text-align:center; }
+  .monthnav button{ padding:5px 10px; }
+
+  /* ---- tables / lists ---- */
+  .mrow{ display:grid; grid-template-columns:1.2fr .7fr 1fr 1fr; gap:6px; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12.5px; padding:9px 0; border-bottom:1px dashed var(--receipt-edge); }
+  .mhead{ display:grid; grid-template-columns:1.2fr .7fr 1fr 1fr; gap:6px; font-size:8.5px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; color:var(--ink-soft); padding-bottom:8px; border-bottom:1px solid var(--receipt-edge); }
+  .r{ text-align:right; }
+  .dim{ color:var(--ink-soft); }
+  .frow{ display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-bottom:1px dashed var(--receipt-edge); }
+  .frow .body{ flex:1; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12.5px; line-height:1.65; }
+  .frow .sub{ margin-top:3px; }
+  .frow .sub.dim{ color:var(--ink-soft); }
+  .del{ background:none; border:none; color:var(--ink-soft); font-family:var(--mono); font-size:15px; padding:2px 6px; }
+  .del:hover{ color:var(--red); }
+
+  .review{ margin-top:12px; border:1px solid var(--ink); background:var(--field); border-radius:2px; padding:14px 14px 12px; }
+  .review .rk{ color:var(--ink); margin-bottom:10px; }
+  .review .rbody{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12.5px; line-height:1.8; }
+
+  .foot{ font-family:var(--mono); font-size:10.5px; color:rgba(255,255,255,.3); text-align:center; margin-top:14px; }
+
+  @media (max-width:520px){
+    .mrow,.mhead{ grid-template-columns:1fr .5fr .9fr .9fr; font-size:11.5px; }
+  }
+  @media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ================= PUMP DISPLAY ================= -->
+  <div class="pump">
+    <p class="lbl eyebrow">Tacoma TRD Sport &nbsp;·&nbsp; tank-to-tank fuel log</p>
+    <div class="readouts">
+      <div class="ro"><div class="k">True MPG</div><div class="v"><span class="fig off" id="roMpg">--.--</span></div></div>
+      <div class="ro"><div class="k">Cost / mile</div><div class="v"><span class="fig off" id="roCpm">--.--</span></div></div>
+      <div class="ro"><div class="k">Commute</div><div class="v"><span class="fig off" id="roCommute">--.--</span><span class="u">/ mo</span></div></div>
+      <div class="ro"><div class="k">All driving</div><div class="v"><span class="fig off" id="roAll">--.--</span><span class="u">/ mo</span></div></div>
+    </div>
+    <div class="pumpfoot" id="pumpFoot"></div>
+  </div>
+
+  <div class="seam"></div>
+
+  <!-- ================= RECEIPT ================= -->
+  <div class="receipt">
+
+    <!-- add fill -->
+    <div class="sec">
+      <h2>Add fill-up</h2>
+      <div class="row">
+        <div class="fld"><label for="fDate">Date</label><input type="date" id="fDate"></div>
+        <div class="fld"><label for="fOdo">Odometer</label><input type="text" id="fOdo" inputmode="decimal" placeholder="12430"></div>
+        <div class="fld"><label for="fGal">Gallons</label><input type="text" id="fGal" inputmode="decimal" placeholder="15.02"></div>
+        <div class="fld"><label for="fPrice">$ / gallon</label><input type="text" id="fPrice" inputmode="decimal" placeholder="4.19"></div>
+      </div>
+      <div class="actions">
+        <label class="chk"><input type="checkbox" id="fFull" checked> Filled to the first click</label>
+        <button class="btn lg push" id="addBtn" type="button">Log it</button>
+      </div>
+      <p class="note" id="saleNote" hidden></p>
+      <p class="note err" id="formErr" hidden></p>
+      <p class="note err" id="storeErr" hidden></p>
+    </div>
+
+    <!-- commute days -->
+    <div class="sec">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <h2 style="margin:0">Commute days</h2>
+        <div class="monthnav push">
+          <button class="ghost" id="prevM" type="button" aria-label="Previous month">‹</button>
+          <span class="mlabel" id="mLabel"></span>
+          <button class="ghost" id="nextM" type="button" aria-label="Next month">›</button>
+        </div>
+      </div>
+      <div class="cal" id="cal"></div>
+      <div class="actions">
+        <button class="ghost" id="seedBtn" type="button">Fill weekdays</button>
+        <button class="ghost soft" id="clearMBtn" type="button">Clear month</button>
+        <span class="push" style="font-family:var(--mono);font-size:12px" id="mCount"></span>
+      </div>
+      <div class="row" style="align-items:flex-end;margin-top:14px">
+        <div class="fld" style="flex:0 1 130px"><label for="rt">Round trip mi</label><input type="text" id="rt" inputmode="decimal"></div>
+        <p class="note" style="flex:1;margin:0 0 8px">Tap a day you drove in. Weekends are dimmed but tappable.</p>
+      </div>
+    </div>
+
+    <!-- by month -->
+    <div class="sec">
+      <h2>By month</h2>
+      <div id="monthTable"></div>
+    </div>
+
+    <!-- fill history -->
+    <div class="sec">
+      <h2 id="histHead">Fill history</h2>
+      <div id="histList"></div>
+    </div>
+
+    <!-- backup -->
+    <div class="sec">
+      <h2>Backup</h2>
+      <div class="row" style="gap:8px">
+        <button class="ghost" id="exportBtn" type="button">Export backup</button>
+        <button class="ghost" id="fileBtn" type="button">Restore from file</button>
+        <button class="ghost soft" id="pasteBtn" type="button">Paste backup</button>
+        <input type="file" id="fileInput" accept="application/json,.json" hidden>
+      </div>
+      <p class="note" id="exportNote" hidden></p>
+
+      <div id="exportBox" hidden style="margin-top:10px">
+        <textarea id="exportText" rows="5" readonly></textarea>
+        <div class="row" style="gap:8px;margin-top:8px">
+          <button class="ghost" id="copyBackupBtn" type="button">Copy backup text</button>
+          <button class="ghost soft" id="hideBackupBtn" type="button">Hide</button>
+        </div>
+      </div>
+
+      <div id="pasteBox" hidden style="margin-top:12px">
+        <label class="lbl" style="display:block;color:var(--ink-soft);margin-bottom:5px" for="pasteText">Paste backup JSON</label>
+        <textarea id="pasteText" rows="4" placeholder='{ "app": "tacoma-fuel-log", … }'></textarea>
+        <button class="btn" id="checkPasteBtn" type="button" style="margin-top:8px">Check this backup</button>
+      </div>
+
+      <p class="note err boxed" id="importErr" hidden></p>
+      <div class="review" id="reviewBox" hidden></div>
+      <p class="note ok boxed" id="restoreMsg" hidden></p>
+      <div class="actions" id="undoRow" hidden>
+        <button class="ghost strong" id="undoBtn" type="button">Undo restore</button>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)" id="undoLabel"></span>
+      </div>
+    </div>
+
+    <!-- danger zone -->
+    <div class="sec">
+      <div class="row" style="gap:8px">
+        <button class="ghost" id="copyLogBtn" type="button">Copy log as text</button>
+        <button class="ghost soft" id="clearBtn" type="button">Clear log</button>
+      </div>
+      <div id="confirmRow" hidden>
+        <div class="row" style="gap:8px;margin-top:10px">
+          <button class="btn danger" id="confirmClear" type="button">Yes, delete everything</button>
+          <button class="ghost soft" id="cancelClear" type="button">Keep it</button>
+        </div>
+        <p class="note err">Export a backup first if there's any chance you'll want this back.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <p class="foot" id="verFoot"></p>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- constants ---------- */
+  var VERSION = "1.0";
+  var KEY = "tacomaFuelLog.v1";
+  var KEY_UNDO = "tacomaFuelLog.undo";
+  var BACKUP_APP = "tacoma-fuel-log";
+  var BACKUP_VERSION = 2;
+  var UNDO_TTL = 24 * 3600 * 1000;
+  var MS_DAY = 86400000;
+  var AVG_MONTH = 30.44;
+  var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  /* ---------- tiny helpers ---------- */
+  function $(id){ return document.getElementById(id); }
+  function show(el,on){ el.hidden = !on; }
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+  function numOf(v){ var n = parseFloat(String(v).replace(/[^0-9.\-]/g,"")); return isFinite(n) ? n : null; }
+  function todayISO(){
+    var d = new Date();
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  }
+  function monthLabel(ym){ var p = ym.split("-"); return MONTHS[+p[1]-1]+" "+p[0]; }
+  function shiftMonth(ym,d){
+    var p = ym.split("-").map(Number);
+    var dt = new Date(Date.UTC(p[0], p[1]-1+d, 1));
+    return dt.toISOString().slice(0,7);
+  }
+  function monthCells(ym){
+    var p = ym.split("-").map(Number);
+    var startDow = new Date(Date.UTC(p[0], p[1]-1, 1)).getUTCDay();
+    var daysIn = new Date(Date.UTC(p[0], p[1], 0)).getUTCDate();
+    var out = [];
+    for(var i=0;i<startDow;i++) out.push(null);
+    for(var d=1; d<=daysIn; d++) out.push(ym+"-"+String(d).padStart(2,"0"));
+    return out;
+  }
+  function isWeekend(iso){ var d = new Date(iso+"T12:00:00Z").getUTCDay(); return d===0 || d===6; }
+  function stamp(iso){ try{ return new Date(iso).toLocaleString(); }catch(e){ return iso; } }
+  function money(n){ return "$"+n.toFixed(2); }
+
+  /* ---------- state ---------- */
+  var state = { fills:[], commuteDays:[], roundTrip:45 };
+  var viewMonth = todayISO().slice(0,7);
+  var pending = null;
+  var undoSnap = null;
+
+  function load(){
+    try{
+      var raw = localStorage.getItem(KEY);
+      if(raw){
+        var o = JSON.parse(raw);
+        if(Array.isArray(o.fills)) state.fills = o.fills;
+        if(Array.isArray(o.commuteDays)) state.commuteDays = o.commuteDays;
+        if(numOf(o.roundTrip) != null) state.roundTrip = o.roundTrip;
+      }
+    }catch(e){}
+    try{
+      var u = localStorage.getItem(KEY_UNDO);
+      if(u){
+        var s = JSON.parse(u);
+        if(s && s.at && (Date.now() - s.at) < UNDO_TTL) undoSnap = s;
+      }
+    }catch(e){}
+  }
+  function save(){
+    try{
+      localStorage.setItem(KEY, JSON.stringify(state));
+      show($("storeErr"), false);
+    }catch(e){
+      $("storeErr").textContent = "This browser refused to save (private mode or storage full). Export a backup now — your entries only live in this tab.";
+      show($("storeErr"), true);
+    }
+  }
+
+  /* ---------- analysis ---------- */
+  function analyze(){
+    var rt = numOf(state.roundTrip) || 0;
+    var sorted = state.fills.slice().sort(function(a,b){ return a.odo - b.odo; });
+    var rows = [], anchor = null, gal = 0, cost = 0, count = 0, tank = 0;
+
+    for(var i=0;i<sorted.length;i++){
+      var f = sorted[i];
+      if(!anchor){
+        rows.push({ f:f, kind: f.full ? "baseline" : "orphan" });
+        if(f.full) anchor = f;
+        continue;
+      }
+      gal += f.gal; cost += f.gal * f.price; count += 1;
+      if(f.full){
+        tank += 1;
+        var miles = f.odo - anchor.odo;
+        rows.push({ f:f, kind:"closed", tank:tank, miles:miles, gal:gal, cost:cost,
+          mpg: (miles>0 && gal>0) ? miles/gal : null, rolled: count>1 ? count : 0 });
+        anchor = f; gal = 0; cost = 0; count = 0;
+      } else {
+        rows.push({ f:f, kind:"partial" });
+      }
+    }
+
+    var closed = rows.filter(function(r){ return r.kind==="closed" && r.mpg != null; });
+    var miles = closed.reduce(function(s,r){ return s + r.miles; }, 0);
+    var gallons = closed.reduce(function(s,r){ return s + r.gal; }, 0);
+    var spend = closed.reduce(function(s,r){ return s + r.cost; }, 0);
+    var mpg = gallons > 0 ? miles/gallons : null;
+    var cpm = miles > 0 ? spend/miles : null;
+    var avgPrice = gallons > 0 ? spend/gallons : null;
+
+    var spanDays = 0, runRate = null;
+    if(closed.length && sorted.length){
+      var t0 = Date.parse(sorted[0].date+"T12:00:00Z");
+      var t1 = Date.parse(sorted[sorted.length-1].date+"T12:00:00Z");
+      spanDays = Math.round((t1-t0)/MS_DAY);
+      if(spanDays >= 14) runRate = (spend/spanDays) * AVG_MONTH;
+    }
+
+    var keys = {};
+    state.fills.forEach(function(f){ keys[f.date.slice(0,7)] = 1; });
+    state.commuteDays.forEach(function(d){ keys[d.slice(0,7)] = 1; });
+    var months = Object.keys(keys).sort().reverse().map(function(ym){
+      var days = state.commuteDays.filter(function(d){ return d.indexOf(ym)===0; }).length;
+      var cMiles = days * rt;
+      var pump = state.fills.filter(function(f){ return f.date.indexOf(ym)===0; })
+        .reduce(function(s,f){ return s + f.gal*f.price; }, 0);
+      return { ym:ym, days:days, cMiles:cMiles, pump:pump, cCost: cpm != null ? cMiles*cpm : null };
+    });
+
+    var withDays = months.filter(function(m){ return m.days > 0; });
+    var avgDays = withDays.length ? state.commuteDays.length / withDays.length : 0;
+    var typicalCommute = (cpm != null && avgDays > 0) ? avgDays * rt * cpm : null;
+    var other = (runRate != null && typicalCommute != null) ? runRate - typicalCommute : null;
+
+    rows.reverse();
+    return { rows:rows, tanks:closed.length, miles:miles, gallons:gallons, spend:spend,
+      mpg:mpg, cpm:cpm, avgPrice:avgPrice, openGal:gal, spanDays:spanDays, runRate:runRate,
+      months:months, avgDays:avgDays, typicalCommute:typicalCommute, other:other, roundTrip:rt };
+  }
+
+  /* ---------- render ---------- */
+  function setRO(el, txt){
+    if(txt == null){ el.textContent = "--.--"; el.classList.add("off"); }
+    else { el.textContent = txt; el.classList.remove("off"); }
+  }
+
+  function render(){
+    var a = analyze();
+
+    setRO($("roMpg"), a.mpg != null ? a.mpg.toFixed(2) : null);
+    setRO($("roCpm"), a.cpm != null ? "$"+a.cpm.toFixed(3) : null);
+    setRO($("roCommute"), a.typicalCommute != null ? "$"+a.typicalCommute.toFixed(0) : null);
+    setRO($("roAll"), a.runRate != null ? "$"+a.runRate.toFixed(0) : null);
+
+    // pump footnote
+    var fp = "";
+    if(a.tanks === 0){
+      fp = "Log two full fills to measure your first tank. The first one is only a baseline.";
+    } else {
+      fp = a.tanks + " closed tank" + (a.tanks>1?"s":"") + " &nbsp;·&nbsp; " +
+           a.miles.toLocaleString() + " mi &nbsp;·&nbsp; " + a.gallons.toFixed(2) +
+           " gal &nbsp;·&nbsp; $" + a.avgPrice.toFixed(3) + "/gal avg";
+      if(a.avgDays > 0) fp += "<br>Commute basis: " + a.avgDays.toFixed(1) + " days/mo avg × " + a.roundTrip + " mi round trip";
+      if(a.runRate == null && a.spanDays > 0) fp += "<br>All-driving run rate needs 14+ days of span — you have " + a.spanDays + ".";
+      if(a.other != null) fp += "<br>Non-commute driving: ~$" + a.other.toFixed(0) + "/mo";
+      if(a.openGal > 0) fp += "<br>Tank in progress: " + a.openGal.toFixed(2) + " gal pumped, not yet closed.";
+    }
+    $("pumpFoot").innerHTML = fp;
+
+    // calendar
+    $("mLabel").textContent = monthLabel(viewMonth);
+    var cells = monthCells(viewMonth), html = "";
+    ["S","M","T","W","T","F","S"].forEach(function(d){ html += '<div class="dow">'+d+'</div>'; });
+    cells.forEach(function(iso,i){
+      if(!iso){ html += '<div class="pad"></div>'; return; }
+      var on = state.commuteDays.indexOf(iso) !== -1;
+      var cls = [];
+      if(on) cls.push("on");
+      if(isWeekend(iso)) cls.push("wknd");
+      if(iso === todayISO() && !on) cls.push("today");
+      html += '<button type="button" class="'+cls.join(" ")+'" data-day="'+iso+'" aria-pressed="'+on+'">'+(+iso.slice(-2))+'</button>';
+    });
+    $("cal").innerHTML = html;
+
+    var mc = state.commuteDays.filter(function(d){ return d.indexOf(viewMonth)===0; }).length;
+    $("mCount").innerHTML = "<strong>"+mc+"</strong> days · "+(mc*a.roundTrip).toLocaleString()+" mi";
+    $("rt").value = state.roundTrip;
+
+    // by month
+    if(a.months.length === 0){
+      $("monthTable").innerHTML = '<p class="note" style="margin-top:0">Nothing logged yet.</p>';
+    } else {
+      var mt = '<div class="mhead"><div>Month</div><div class="r">Days</div><div class="r">Pump spend</div><div class="r">Commute</div></div>';
+      a.months.forEach(function(m){
+        mt += '<div class="mrow"><div>'+monthLabel(m.ym)+'</div>'+
+              '<div class="r'+(m.days?"":" dim")+'">'+(m.days||"—")+'</div>'+
+              '<div class="r">'+(m.pump>0?money(m.pump):"—")+'</div>'+
+              '<div class="r">'+((m.cCost!=null && m.days)?money(m.cCost):"—")+'</div></div>';
+      });
+      mt += '<p class="note small">Pump spend is what you actually paid that month, so it jumps around with fill-up timing. Commute cost is calculated from days driven, so it tracks real usage.</p>';
+      $("monthTable").innerHTML = mt;
+    }
+
+    // history
+    $("histHead").textContent = "Fill history" + (state.fills.length ? " — "+state.fills.length : "");
+    if(state.fills.length === 0){
+      $("histList").innerHTML = '<p class="note" style="margin-top:0">Nothing logged. Next time you fill up, enter the odometer and the gallons off the receipt.</p>';
+    } else {
+      var hl = "";
+      a.rows.forEach(function(r){
+        var sub = "";
+        if(r.kind === "closed"){
+          sub = "<strong>Tank "+String(r.tank).padStart(2,"0")+" &nbsp;·&nbsp; "+r.miles.toLocaleString()+" mi &nbsp;·&nbsp; "+
+                r.mpg.toFixed(2)+" MPG &nbsp;·&nbsp; $"+(r.cost/r.miles).toFixed(3)+"/mi"+
+                (r.rolled ? " · "+r.rolled+" fills rolled in" : "")+"</strong>";
+        } else if(r.kind === "baseline") sub = "Baseline — starts the measurement, no MPG";
+        else if(r.kind === "partial") sub = "Partial — rolls into the next full fill";
+        else sub = "Partial before any full fill — not usable";
+
+        hl += '<div class="frow"><div class="body"><div>'+
+              r.f.date+' &nbsp; ODO '+r.f.odo.toLocaleString()+' &nbsp; '+r.f.gal.toFixed(2)+
+              ' gal @ $'+r.f.price.toFixed(3)+' &nbsp; = '+money(r.f.gal*r.f.price)+'</div>'+
+              '<div class="sub'+(r.kind==="closed"?"":" dim")+'">'+sub+'</div></div>'+
+              '<button class="del" type="button" data-del="'+r.f.id+'" aria-label="Remove fill-up">×</button></div>';
+      });
+      $("histList").innerHTML = hl;
+    }
+
+    // undo row
+    if(undoSnap){
+      show($("undoRow"), true);
+      $("undoLabel").textContent = "Snapshot from " + stamp(new Date(undoSnap.at).toISOString()) + " · good for 24 hours";
+    } else show($("undoRow"), false);
+
+    var hasData = state.fills.length > 0 || state.commuteDays.length > 0;
+    $("exportBtn").disabled = !hasData;
+    $("copyLogBtn").disabled = !hasData;
+    $("clearBtn").hidden = !hasData;
+
+    $("verFoot").textContent = "v"+VERSION+" · your log stays in this browser · export regularly";
+  }
+
+  /* ---------- actions ---------- */
+  function addFill(){
+    var odo = numOf($("fOdo").value), gal = numOf($("fGal").value), price = numOf($("fPrice").value);
+    var date = $("fDate").value || todayISO();
+    var e = $("formErr");
+    function fail(msg){ e.textContent = msg; show(e,true); }
+    if(odo == null) return fail("Enter the odometer reading.");
+    if(gal == null || gal <= 0) return fail("Enter the gallons from the receipt.");
+    if(price == null || price <= 0) return fail("Enter the price per gallon.");
+    if(state.fills.some(function(f){ return f.odo === odo; })) return fail("That odometer reading is already logged.");
+    show(e,false);
+    state.fills.push({ id:"f"+Date.now()+Math.random().toString(36).slice(2,6),
+      date:date, odo:odo, gal:gal, price:price, full:$("fFull").checked });
+    save(); render();
+    $("fOdo").value=""; $("fGal").value=""; $("fPrice").value="";
+    $("fDate").value = todayISO(); $("fFull").checked = true;
+    show($("saleNote"), false);
+    $("fOdo").focus();
+  }
+
+  function updateSale(){
+    var g = numOf($("fGal").value), p = numOf($("fPrice").value);
+    if(g != null && p != null && g > 0 && p > 0){
+      $("saleNote").textContent = "Total sale: " + money(g*p);
+      show($("saleNote"), true);
+    } else show($("saleNote"), false);
+  }
+
+  /* ---------- backup ---------- */
+  function buildBackup(){
+    return { app:BACKUP_APP, version:BACKUP_VERSION, exportedAt:new Date().toISOString(),
+      roundTrip: numOf(state.roundTrip) != null ? numOf(state.roundTrip) : 45,
+      fills: state.fills, commuteDays: state.commuteDays };
+  }
+
+  function doExport(){
+    var json = JSON.stringify(buildBackup(), null, 2);
+    $("exportText").value = json;
+    show($("exportBox"), true);
+    show($("importErr"), false); show($("restoreMsg"), false);
+    try{
+      var blob = new Blob([json], {type:"application/json"});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url; a.download = "tacoma-fuel-log-"+todayISO()+".json";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1500);
+      $("exportNote").textContent = "Backup downloaded. If no file appeared, copy the text below and save it yourself.";
+    }catch(err){
+      $("exportNote").textContent = "Download failed here. Copy the text below and save it as a .json file.";
+    }
+    show($("exportNote"), true);
+  }
+
+  function copyBackup(){
+    var ta = $("exportText");
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(ta.value).then(function(){
+        $("exportNote").textContent = "Backup copied to the clipboard.";
+      }).catch(function(){ legacyCopy(ta); });
+    } else legacyCopy(ta);
+  }
+  function legacyCopy(ta){
+    ta.focus(); ta.select();
+    var ok = false;
+    try{ ok = document.execCommand("copy"); }catch(e){}
+    $("exportNote").textContent = ok ? "Backup copied to the clipboard."
+      : "Copy was blocked. The text is selected — press Ctrl/Cmd+C.";
+  }
+
+  function validateBackup(raw){
+    var obj;
+    try{ obj = JSON.parse(raw); }
+    catch(e){ return { error:"That isn't valid JSON. Make sure you copied the whole file." }; }
+    if(!obj || typeof obj !== "object" || Array.isArray(obj))
+      return { error:"That file isn't a fuel log backup." };
+    if(obj.app && obj.app !== BACKUP_APP)
+      return { error:'That backup came from "'+esc(String(obj.app).slice(0,40))+'", not the fuel log.' };
+    if(!Array.isArray(obj.fills) && !Array.isArray(obj.commuteDays))
+      return { error:"No fill-ups or commute days found in that file." };
+
+    var fills = [], seenOdo = {}, droppedFills = 0, n = 0;
+    (obj.fills || []).forEach(function(f){
+      var odo = numOf(f && f.odo), gal = numOf(f && f.gal), price = numOf(f && f.price);
+      var date = (f && typeof f.date === "string" && DATE_RE.test(f.date)) ? f.date : null;
+      if(odo == null || odo < 0 || gal == null || gal <= 0 || price == null || price <= 0 || !date || seenOdo[odo]){
+        droppedFills++; return;
+      }
+      seenOdo[odo] = 1;
+      fills.push({ id:"i"+Date.now()+"_"+(n++), date:date, odo:odo, gal:gal, price:price, full: f.full !== false });
+    });
+
+    var days = [], seenDay = {}, droppedDays = 0;
+    (obj.commuteDays || []).forEach(function(d){
+      if(typeof d === "string" && DATE_RE.test(d) && !isNaN(Date.parse(d+"T12:00:00Z"))){
+        if(!seenDay[d]){ seenDay[d] = 1; days.push(d); }
+      } else droppedDays++;
+    });
+
+    var rt = numOf(obj.roundTrip);
+    return { fills:fills, days:days.sort(), droppedFills:droppedFills, droppedDays:droppedDays,
+      roundTrip: (rt != null && rt > 0) ? rt : null,
+      exportedAt: typeof obj.exportedAt === "string" ? obj.exportedAt : null,
+      legacy: !obj.app };
+  }
+
+  function stageImport(raw){
+    show($("restoreMsg"), false);
+    var res = validateBackup(raw);
+    if(res.error){
+      $("importErr").innerHTML = res.error;
+      show($("importErr"), true); show($("reviewBox"), false); pending = null; return;
+    }
+    if(res.fills.length === 0 && res.days.length === 0){
+      $("importErr").textContent = "That backup parsed, but there was nothing usable in it.";
+      show($("importErr"), true); show($("reviewBox"), false); pending = null; return;
+    }
+    show($("importErr"), false);
+    var existing = {};
+    state.fills.forEach(function(f){ existing[f.odo] = 1; });
+    res.overlap = res.fills.filter(function(f){ return existing[f.odo]; }).length;
+    pending = res;
+
+    var h = '<div class="lbl rk">Review before restoring</div><div class="rbody">' +
+      res.fills.length + " fill-up" + (res.fills.length===1?"":"s") + " · " +
+      res.days.length + " commute day" + (res.days.length===1?"":"s") +
+      (res.roundTrip != null ? " · " + res.roundTrip + " mi round trip" : "");
+    if(res.exportedAt) h += "<br>Exported " + esc(stamp(res.exportedAt));
+    if(res.overlap > 0) h += "<br>" + res.overlap + " fill-up" + (res.overlap===1?"":"s") +
+      " already in your log — merge will skip " + (res.overlap===1?"it":"them") + ".";
+    h += "</div>";
+    if(res.droppedFills > 0 || res.droppedDays > 0)
+      h += '<p class="note err">Skipped as unreadable: '+res.droppedFills+' fill-up rows, '+res.droppedDays+' day entries.</p>';
+    if(res.legacy)
+      h += '<p class="note">No app tag in this file — it parsed cleanly, but double-check the numbers above look like yours.</p>';
+    h += '<div class="row" style="gap:8px;margin-top:14px">'+
+         '<button class="btn" type="button" data-restore="merge">Merge into log</button>'+
+         '<button class="ghost danger" type="button" data-restore="replace">Replace everything</button>'+
+         '<button class="ghost soft" type="button" data-restore="cancel">Cancel</button></div>'+
+         '<p class="note small">Merge keeps what you have and adds what\'s missing. Replace wipes the current log first — you\'ll get one undo.</p>';
+    $("reviewBox").innerHTML = h;
+    show($("reviewBox"), true);
+    show($("pasteBox"), false); $("pasteText").value = "";
+  }
+
+  function applyRestore(mode){
+    if(mode === "cancel"){ pending = null; show($("reviewBox"), false); return; }
+    if(!pending) return;
+
+    undoSnap = { at:Date.now(), fills:state.fills.slice(), commuteDays:state.commuteDays.slice(), roundTrip:state.roundTrip };
+    try{ localStorage.setItem(KEY_UNDO, JSON.stringify(undoSnap)); }catch(e){}
+
+    var skipped = 0, msg;
+    if(mode === "replace"){
+      state.fills = pending.fills;
+      state.commuteDays = pending.days;
+      if(pending.roundTrip != null) state.roundTrip = pending.roundTrip;
+      msg = "Replaced. Now holding " + state.fills.length + " fill-ups and " + state.commuteDays.length + " commute days.";
+    } else {
+      var seen = {};
+      state.fills.forEach(function(f){ seen[f.odo] = 1; });
+      pending.fills.forEach(function(f){
+        if(seen[f.odo]){ skipped++; return; }
+        seen[f.odo] = 1; state.fills.push(f);
+      });
+      var dayset = {};
+      state.commuteDays.concat(pending.days).forEach(function(d){ dayset[d] = 1; });
+      state.commuteDays = Object.keys(dayset).sort();
+      msg = "Merged. Added " + (pending.fills.length - skipped) + " fill-ups" +
+            (skipped ? ", skipped " + skipped + " already logged" : "") +
+            ", now " + state.commuteDays.length + " commute days.";
+    }
+    save();
+    pending = null;
+    show($("reviewBox"), false);
+    $("restoreMsg").textContent = msg;
+    show($("restoreMsg"), true);
+    render();
+  }
+
+  function undoRestore(){
+    if(!undoSnap) return;
+    state.fills = (undoSnap.fills || []).slice();
+    state.commuteDays = (undoSnap.commuteDays || []).slice();
+    state.roundTrip = undoSnap.roundTrip != null ? undoSnap.roundTrip : 45;
+    undoSnap = null;
+    try{ localStorage.removeItem(KEY_UNDO); }catch(e){}
+    save();
+    $("restoreMsg").textContent = "Restore undone — back to where you were.";
+    show($("restoreMsg"), true);
+    render();
+  }
+
+  function copyLogText(){
+    var a = analyze();
+    var lines = [];
+    lines.push("Tacoma fuel log — " + state.fills.length + " fill-ups, " + state.commuteDays.length + " commute days");
+    lines.push("Round trip: " + a.roundTrip + " mi");
+    lines.push("");
+    lines.push("FILLS  date | odometer | gallons | $/gal | full");
+    state.fills.slice().sort(function(x,y){ return x.odo - y.odo; }).forEach(function(f){
+      lines.push(f.date+" | "+f.odo+" | "+f.gal.toFixed(2)+" | "+f.price.toFixed(3)+" | "+(f.full?"yes":"partial"));
+    });
+    lines.push("");
+    lines.push("BY MONTH  month | commute days | pump spend");
+    a.months.forEach(function(m){ lines.push(m.ym+" | "+m.days+" | $"+m.pump.toFixed(2)); });
+    lines.push("");
+    lines.push(a.mpg != null
+      ? "Measured "+a.mpg.toFixed(2)+" MPG over "+a.miles+" mi / "+a.gallons.toFixed(2)+" gal · $"+a.cpm.toFixed(3)+"/mi"
+      : "Not enough full fills yet to measure MPG.");
+    var txt = lines.join("\n");
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(function(){
+        $("copyLogBtn").textContent = "Copied";
+        setTimeout(function(){ $("copyLogBtn").textContent = "Copy log as text"; }, 2000);
+      }).catch(function(){ fallbackText(txt); });
+    } else fallbackText(txt);
+  }
+  function fallbackText(txt){
+    $("exportText").value = txt;
+    show($("exportBox"), true);
+    $("exportNote").textContent = "Clipboard blocked — the log text is in the box below.";
+    show($("exportNote"), true);
+  }
+
+  /* ---------- wiring ---------- */
+  load();
+  $("fDate").value = todayISO();
+
+  $("addBtn").addEventListener("click", addFill);
+  ["fGal","fPrice"].forEach(function(id){ $(id).addEventListener("input", updateSale); });
+  ["fOdo","fGal","fPrice"].forEach(function(id){
+    $(id).addEventListener("keydown", function(ev){ if(ev.key === "Enter") addFill(); });
+  });
+
+  $("prevM").addEventListener("click", function(){ viewMonth = shiftMonth(viewMonth,-1); render(); });
+  $("nextM").addEventListener("click", function(){ viewMonth = shiftMonth(viewMonth, 1); render(); });
+
+  $("cal").addEventListener("click", function(ev){
+    var b = ev.target.closest("button[data-day]");
+    if(!b) return;
+    var iso = b.getAttribute("data-day");
+    var i = state.commuteDays.indexOf(iso);
+    if(i === -1) state.commuteDays.push(iso); else state.commuteDays.splice(i,1);
+    state.commuteDays.sort();
+    save(); render();
+  });
+  $("seedBtn").addEventListener("click", function(){
+    var set = {};
+    state.commuteDays.forEach(function(d){ set[d] = 1; });
+    monthCells(viewMonth).forEach(function(d){ if(d && !isWeekend(d)) set[d] = 1; });
+    state.commuteDays = Object.keys(set).sort();
+    save(); render();
+  });
+  $("clearMBtn").addEventListener("click", function(){
+    state.commuteDays = state.commuteDays.filter(function(d){ return d.indexOf(viewMonth) !== 0; });
+    save(); render();
+  });
+  $("rt").addEventListener("input", function(ev){ state.roundTrip = ev.target.value; save(); render(); });
+
+  $("histList").addEventListener("click", function(ev){
+    var b = ev.target.closest("button[data-del]");
+    if(!b) return;
+    var id = b.getAttribute("data-del");
+    state.fills = state.fills.filter(function(f){ return String(f.id) !== id; });
+    save(); render();
+  });
+
+  $("exportBtn").addEventListener("click", doExport);
+  $("copyBackupBtn").addEventListener("click", copyBackup);
+  $("hideBackupBtn").addEventListener("click", function(){
+    show($("exportBox"), false); show($("exportNote"), false);
+  });
+  $("fileBtn").addEventListener("click", function(){ $("fileInput").click(); });
+  $("fileInput").addEventListener("change", function(ev){
+    var f = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if(!f) return;
+    var rd = new FileReader();
+    rd.onload = function(){ stageImport(String(rd.result)); };
+    rd.onerror = function(){
+      $("importErr").textContent = "Couldn't read that file. Try the paste option instead.";
+      show($("importErr"), true);
+    };
+    rd.readAsText(f);
+  });
+  $("pasteBtn").addEventListener("click", function(){
+    var open = $("pasteBox").hidden;
+    show($("pasteBox"), open);
+    $("pasteBtn").textContent = open ? "Cancel paste" : "Paste backup";
+    show($("importErr"), false);
+  });
+  $("checkPasteBtn").addEventListener("click", function(){
+    var v = $("pasteText").value.trim();
+    if(v) stageImport(v);
+  });
+  $("reviewBox").addEventListener("click", function(ev){
+    var b = ev.target.closest("button[data-restore]");
+    if(b) applyRestore(b.getAttribute("data-restore"));
+  });
+  $("undoBtn").addEventListener("click", undoRestore);
+  $("copyLogBtn").addEventListener("click", copyLogText);
+
+  $("clearBtn").addEventListener("click", function(){ show($("confirmRow"), true); });
+  $("cancelClear").addEventListener("click", function(){ show($("confirmRow"), false); });
+  $("confirmClear").addEventListener("click", function(){
+    undoSnap = { at:Date.now(), fills:state.fills.slice(), commuteDays:state.commuteDays.slice(), roundTrip:state.roundTrip };
+    try{ localStorage.setItem(KEY_UNDO, JSON.stringify(undoSnap)); }catch(e){}
+    state.fills = []; state.commuteDays = [];
+    save(); show($("confirmRow"), false);
+    show($("restoreMsg"), false); show($("reviewBox"), false);
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

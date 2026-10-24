@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#14161A">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
@@ -160,6 +161,12 @@
         <div class="fld"><label for="fGal">Gallons</label><input type="text" id="fGal" inputmode="decimal" placeholder="15.02"></div>
         <div class="fld"><label for="fPrice">$ / gallon</label><input type="text" id="fPrice" inputmode="decimal" placeholder="4.19"></div>
       </div>
+      <div class="row" style="margin-top:10px">
+        <div class="fld" style="flex:0 1 96px"><label for="fTemp">Temp &deg;F</label><input type="text" id="fTemp" inputmode="decimal" placeholder="42"></div>
+        <div class="fld" style="flex:0 0 auto"><label aria-hidden="true">&nbsp;</label><button class="ghost" id="tempBtn" type="button" style="padding:10px 12px">Fetch</button></div>
+        <div class="fld" style="flex:3 1 200px"><label for="fNote">Note <span style="opacity:.55">optional</span></label><input type="text" id="fNote" maxlength="40" placeholder="eco mode, highway, trip…"></div>
+      </div>
+      <p class="note" id="wxNote" hidden></p>
       <div class="actions">
         <label class="chk"><input type="checkbox" id="fFull" checked> Filled to the first click</label>
         <button class="btn lg push" id="addBtn" type="button">Log it</button>
@@ -201,6 +208,12 @@
     <div class="sec">
       <h2 id="histHead">Fill history</h2>
       <div id="histList"></div>
+    </div>
+
+    <!-- temperature -->
+    <div class="sec">
+      <h2>Temperature vs MPG</h2>
+      <div id="tempTable"></div>
     </div>
 
     <!-- backup -->
@@ -262,11 +275,11 @@
   "use strict";
 
   /* ---------- constants ---------- */
-  var VERSION = "1.0";
+  var VERSION = "1.1";
   var KEY = "tacomaFuelLog.v1";
   var KEY_UNDO = "tacomaFuelLog.undo";
   var BACKUP_APP = "tacoma-fuel-log";
-  var BACKUP_VERSION = 2;
+  var BACKUP_VERSION = 3;
   var UNDO_TTL = 24 * 3600 * 1000;
   var MS_DAY = 86400000;
   var AVG_MONTH = 30.44;
@@ -353,6 +366,7 @@
         tank += 1;
         var miles = f.odo - anchor.odo;
         rows.push({ f:f, kind:"closed", tank:tank, miles:miles, gal:gal, cost:cost,
+          tA: numOf(anchor.temp), tB: numOf(f.temp),
           mpg: (miles>0 && gal>0) ? miles/gal : null, rolled: count>1 ? count : 0 });
         anchor = f; gal = 0; cost = 0; count = 0;
       } else {
@@ -479,12 +493,17 @@
 
         hl += '<div class="frow"><div class="body"><div>'+
               r.f.date+' &nbsp; ODO '+r.f.odo.toLocaleString()+' &nbsp; '+r.f.gal.toFixed(2)+
-              ' gal @ $'+r.f.price.toFixed(3)+' &nbsp; = '+money(r.f.gal*r.f.price)+'</div>'+
+              ' gal @ $'+r.f.price.toFixed(3)+' &nbsp; = '+money(r.f.gal*r.f.price)+
+              (numOf(r.f.temp) != null ? ' &nbsp; '+numOf(r.f.temp)+'\u00b0F' : '')+'</div>'+
+              (r.f.note ? '<div class="sub dim">'+esc(r.f.note)+'</div>' : '')+
               '<div class="sub'+(r.kind==="closed"?"":" dim")+'">'+sub+'</div></div>'+
               '<button class="del" type="button" data-del="'+r.f.id+'" aria-label="Remove fill-up">×</button></div>';
       });
       $("histList").innerHTML = hl;
     }
+
+    // ---- temperature vs MPG ----
+    renderTemp(a);
 
     // undo row
     if(undoSnap){
@@ -501,6 +520,126 @@
   }
 
   /* ---------- actions ---------- */
+  /* ---------- NOAA temperature ---------- */
+  var WX_FALLBACK = { lat: 43.6243, lon: -72.5187, label: "Woodstock, VT" };
+
+  function wxSay(msg, isErr){
+    var el = $("wxNote");
+    el.textContent = msg;
+    el.className = isErr ? "note err" : "note";
+    show(el, true);
+  }
+
+  function getCoords(){
+    return new Promise(function(resolve){
+      if(!navigator.geolocation) return resolve(WX_FALLBACK);
+      var done = false;
+      var t = setTimeout(function(){ if(!done){ done = true; resolve(WX_FALLBACK); } }, 6000);
+      navigator.geolocation.getCurrentPosition(
+        function(p){ if(done) return; done = true; clearTimeout(t);
+          resolve({ lat: p.coords.latitude, lon: p.coords.longitude, label: null }); },
+        function(){ if(done) return; done = true; clearTimeout(t); resolve(WX_FALLBACK); },
+        { timeout: 5500, maximumAge: 300000, enableHighAccuracy: false }
+      );
+    });
+  }
+
+  async function jget(url){
+    var r = await fetch(url, { headers: { "Accept": "application/geo+json" } });
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  }
+
+  async function fetchTemp(){
+    var btn = $("tempBtn");
+    btn.disabled = true; btn.textContent = "\u2026";
+    wxSay("Finding your location\u2026");
+    try{
+      var c = await getCoords();
+      wxSay("Reading the forecast\u2026");
+      var pts = await jget("https://api.weather.gov/points/" + c.lat.toFixed(4) + "," + c.lon.toFixed(4));
+      var place = c.label;
+      if(!place && pts.properties && pts.properties.relativeLocation && pts.properties.relativeLocation.properties){
+        var rl = pts.properties.relativeLocation.properties;
+        place = rl.city + ", " + rl.state;
+      }
+      var fc = await jget(pts.properties.forecast);
+      var per = (fc.properties && fc.properties.periods) || [];
+      if(per.length < 2) throw new Error("no forecast periods");
+
+      var a0 = per[0], a1 = per[1];
+      var t0 = Number(a0.temperature), t1 = Number(a1.temperature);
+      if(!isFinite(t0) || !isFinite(t1)) throw new Error("bad temperatures");
+      var mean = Math.round((t0 + t1) / 2);
+
+      // current observation is a bonus, never blocking
+      var now = null;
+      try{
+        var st = await jget(pts.properties.observationStations);
+        if(st.features && st.features.length){
+          var ob = await jget(st.features[0].id + "/observations/latest");
+          var cC = ob.properties && ob.properties.temperature && ob.properties.temperature.value;
+          if(cC != null) now = Math.round(cC * 9 / 5 + 32);
+        }
+      }catch(e2){ /* skip */ }
+
+      $("fTemp").value = mean;
+      var hi = Math.max(t0, t1), lo = Math.min(t0, t1);
+      wxSay((place ? place + ": " : "") + hi + "\u00b0 / " + lo + "\u00b0 next 24h"
+            + (now != null ? ", " + now + "\u00b0 right now" : "")
+            + " \u2014 logging the " + mean + "\u00b0 daily mean. Edit it if you'd rather.");
+    }catch(e){
+      wxSay("Couldn't reach the weather service. Type the temperature in by hand.", true);
+    }
+    btn.disabled = false; btn.textContent = "Fetch";
+  }
+
+  function renderTemp(a){
+    var pts = [];
+    a.rows.forEach(function(r){
+      if(r.kind !== "closed" || r.mpg == null) return;
+      var t = null;
+      if(r.tA != null && r.tB != null) t = (r.tA + r.tB) / 2;
+      else if(r.tB != null) t = r.tB;
+      else if(r.tA != null) t = r.tA;
+      if(t != null) pts.push({ d:r.f.date, t:t, mpg:r.mpg, note:r.f.note || "" });
+    });
+
+    if(pts.length === 0){
+      $("tempTable").innerHTML = '<p class="note" style="margin-top:0">No temperatures logged yet. '
+        + 'Add the outside temp when you fill up and this will separate cold-weather losses from everything else.</p>';
+      return;
+    }
+
+    var h = '<div class="mhead" style="grid-template-columns:1.1fr .7fr .7fr 1.5fr">'
+          + '<div>Tank closed</div><div class="r">Avg &deg;F</div><div class="r">MPG</div><div class="r">Note</div></div>';
+    pts.slice().reverse().forEach(function(p){
+      h += '<div class="mrow" style="grid-template-columns:1.1fr .7fr .7fr 1.5fr">'
+         + '<div>'+p.d+'</div><div class="r">'+p.t.toFixed(0)+'</div>'
+         + '<div class="r"><strong>'+p.mpg.toFixed(2)+'</strong></div>'
+         + '<div class="r dim" style="font-size:11px">'+esc(p.note || "\u2014")+'</div></div>';
+    });
+
+    if(pts.length >= 3){
+      var n = pts.length;
+      var mt = pts.reduce(function(s2,p){ return s2+p.t; },0)/n;
+      var mm = pts.reduce(function(s2,p){ return s2+p.mpg; },0)/n;
+      var num = 0, den = 0;
+      pts.forEach(function(p){ num += (p.t-mt)*(p.mpg-mm); den += (p.t-mt)*(p.t-mt); });
+      if(den > 0){
+        var slope = num/den;
+        h += '<p class="note" style="margin-top:12px"><strong>'
+           + (slope*10 >= 0 ? "+" : "") + (slope*10).toFixed(2)
+           + ' MPG per 10&deg;F</strong> across ' + n + ' tanks. '
+           + 'A 30&deg;F drop would cost about ' + Math.abs(slope*30).toFixed(1) + ' MPG at this rate.</p>';
+      }
+    } else {
+      h += '<p class="note" style="margin-top:12px">Log temperature on '
+         + (3 - pts.length) + ' more tank' + (3-pts.length===1?"":"s") + ' to get a slope.</p>';
+    }
+    $("tempTable").innerHTML = h;
+  }
+
   function addFill(){
     var odo = numOf($("fOdo").value), gal = numOf($("fGal").value), price = numOf($("fPrice").value);
     var date = $("fDate").value || todayISO();
@@ -512,9 +651,12 @@
     if(state.fills.some(function(f){ return f.odo === odo; })) return fail("That odometer reading is already logged.");
     show(e,false);
     state.fills.push({ id:"f"+Date.now()+Math.random().toString(36).slice(2,6),
-      date:date, odo:odo, gal:gal, price:price, full:$("fFull").checked });
+      date:date, odo:odo, gal:gal, price:price, full:$("fFull").checked,
+      temp: numOf($("fTemp").value), note: $("fNote").value.trim().slice(0,40) });
     save(); render();
     $("fOdo").value=""; $("fGal").value=""; $("fPrice").value="";
+    $("fTemp").value=""; $("fNote").value="";
+    show($("wxNote"), false);
     $("fDate").value = todayISO(); $("fFull").checked = true;
     show($("saleNote"), false);
     $("fOdo").focus();
@@ -589,7 +731,8 @@
         droppedFills++; return;
       }
       seenOdo[odo] = 1;
-      fills.push({ id:"i"+Date.now()+"_"+(n++), date:date, odo:odo, gal:gal, price:price, full: f.full !== false });
+      fills.push({ id:"i"+Date.now()+"_"+(n++), date:date, odo:odo, gal:gal, price:price, full: f.full !== false,
+        temp: numOf(f.temp), note: (typeof f.note === "string" ? f.note.slice(0,40) : "") });
     });
 
     var days = [], seenDay = {}, droppedDays = 0;
@@ -699,9 +842,10 @@
     lines.push("Tacoma fuel log — " + state.fills.length + " fill-ups, " + state.commuteDays.length + " commute days");
     lines.push("Round trip: " + a.roundTrip + " mi");
     lines.push("");
-    lines.push("FILLS  date | odometer | gallons | $/gal | full");
+    lines.push("FILLS  date | odometer | gallons | $/gal | full | tempF | note");
     state.fills.slice().sort(function(x,y){ return x.odo - y.odo; }).forEach(function(f){
-      lines.push(f.date+" | "+f.odo+" | "+f.gal.toFixed(2)+" | "+f.price.toFixed(3)+" | "+(f.full?"yes":"partial"));
+      lines.push(f.date+" | "+f.odo+" | "+f.gal.toFixed(2)+" | "+f.price.toFixed(3)+" | "+(f.full?"yes":"partial")
+        +" | "+(numOf(f.temp) != null ? numOf(f.temp) : "-")+" | "+(f.note || "-"));
     });
     lines.push("");
     lines.push("BY MONTH  month | commute days | pump spend");
@@ -730,8 +874,9 @@
   $("fDate").value = todayISO();
 
   $("addBtn").addEventListener("click", addFill);
+  $("tempBtn").addEventListener("click", fetchTemp);
   ["fGal","fPrice"].forEach(function(id){ $(id).addEventListener("input", updateSale); });
-  ["fOdo","fGal","fPrice"].forEach(function(id){
+  ["fOdo","fGal","fPrice","fTemp","fNote"].forEach(function(id){
     $(id).addEventListener("keydown", function(ev){ if(ev.key === "Enter") addFill(); });
   });
 
